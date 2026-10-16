@@ -1,6 +1,7 @@
 """DocVault app: runs on the PC (desktop window) and as the web page phones use (served by serve.py)."""
 
 import asyncio
+import json
 import logging
 import os
 from pathlib import Path
@@ -49,7 +50,9 @@ class DocVaultApp:
         self._poll: asyncio.Task | None = None
         self._debounce: dict[str, asyncio.Task] = {}
         self._syncing = False
-        self.view = "thumbs"  # thumbnails or list, for Recent and inside categories (remembered per device)
+        # Thumbnails or list, chosen separately for Recent ("/") and for each category / Favorites /
+        # Duplicates screen, and remembered on this device.
+        self.views: dict[str, str] = {}
         # Services must be created inside main() so they register with this page.
         self.prefs = ft.SharedPreferences()
         self.launcher = ft.UrlLauncher()
@@ -181,7 +184,7 @@ class DocVaultApp:
         self.api.configure(token=token)
         self.email = await self.prefs.get("dv_email") or ""
         self.api_key = await self.prefs.get("dv_api_key") or ""
-        self.view = await self.prefs.get("dv_view") or "thumbs"
+        self.views = await self._load_views()
 
     async def logged_in_as(self, email: str, res: dict) -> None:
         self.api.configure(token=res["access_token"])
@@ -276,14 +279,27 @@ class DocVaultApp:
 
     # ------------------------------------------------------------ views & drag to reorder
 
-    async def set_view(self, mode: str) -> None:
-        self.view = mode
+    def view_for(self, route: str) -> str:
+        return self.views.get(route, "thumbs")
+
+    async def set_view(self, route: str, mode: str) -> None:
+        self.views[route] = mode
         self._cache.clear()
         self.refresh()
         try:
-            await self.prefs.set("dv_view", mode)
+            await self.prefs.set("dv_views", json.dumps(self.views))
         except Exception:
             pass
+
+    async def _load_views(self) -> dict[str, str]:
+        try:
+            saved = await self.prefs.get("dv_views")
+            if saved:
+                return {k: v for k, v in json.loads(saved).items() if v in ("thumbs", "list")}
+            old = await self.prefs.get("dv_view")  # earlier versions had one setting for everything
+            return {"/": old} if old in ("thumbs", "list") else {}
+        except Exception:
+            return {}
 
     @property
     def drag_affinity(self) -> ft.Axis | None:
