@@ -58,6 +58,10 @@ class DocVaultApp:
         self.launcher = ft.UrlLauncher()
         self.clipboard = ft.Clipboard()
         self.picker = ft.FilePicker()
+        # After every event Flet removes services that look unreferenced, and on Python 3.12 one
+        # attribute isn't enough: the phone then loses e.g. the link opener ("Timeout waiting for
+        # invoke method listener"). A second reference keeps them for the whole session.
+        self._keep_services = [self.prefs, self.launcher, self.clipboard, self.picker]
 
     # ------------------------------------------------------------ helpers
 
