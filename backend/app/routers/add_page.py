@@ -75,10 +75,13 @@ PAGE = """<!doctype html>
          in one PDF) through a shortcut:</p>
       <ol>
         <li>Open <b>Shortcuts</b>, tap <b>+</b> and name it exactly <b>Scan to DocVault</b>.</li>
-        <li>Add <b>Scan Document</b>, then <b>Make PDF</b>.</li>
+        <li>In the <b>Files</b> app, make a folder <b>DocVault Scans</b> (On My iPhone).</li>
+        <li>Add <b>Scan Document</b> (the <b>Files</b> one, not Notes) and set it to save in <b>DocVault Scans</b>.</li>
+        <li>Add <b>Find Files</b>: Add Filter &rarr; <b>Parent Folder is DocVault Scans</b>,
+          Sort by <b>Creation Date</b>, <b>Latest First</b>, <b>Limit</b> on, <b>1</b>.</li>
         <li>Add <b>Get Contents of URL</b> with this URL:
           <code id="url">…</code> <button type="button" id="copy">Copy</button><br>
-          Show More &rarr; Method <b>POST</b>, Request Body <b>File</b>, File = <b>PDF</b>.</li>
+          Show More &rarr; Method <b>POST</b>, Request Body <b>File</b>, File = <b>Files</b>.</li>
         <li>Add <b>Show Notification</b> with <b>Contents of URL</b>.</li>
       </ol>
       <p>Then tap Scan document here, or run the shortcut from your home screen or Siri.</p>
