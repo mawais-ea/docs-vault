@@ -34,10 +34,18 @@ PAGE = """<!doctype html>
   header a { color:var(--accent); text-decoration:none; font-size:15px; }
   h1 { font-size: 24px; margin: 0; flex: 1; }
   p.hint { color: var(--muted); margin: 0 0 20px; }
-  label.button { display:flex; align-items:center; justify-content:center; gap:10px; width:100%; padding:16px;
+  .button { text-decoration:none; }
+  .ios { display:none !important; } body.is-ios .ios { display:flex !important; } body.is-ios details.ios { display:block !important; }
+  details { background:var(--card); border-radius:14px; padding:12px 14px; margin-top:8px; font-size:15px; }
+  summary { color:var(--accent); font-weight:600; cursor:pointer; }
+  details li { display:list-item; background:none; padding:2px 0; margin:0 0 8px; }
+  details ol { padding-left:20px; margin:8px 0; list-style:decimal; }
+  code { word-break:break-all; font-size:13px; }
+  #copy { border:1px solid var(--accent); color:var(--accent); background:none; border-radius:12px; padding:2px 10px; font-size:13px; }
+  .button { display:flex; align-items:center; justify-content:center; gap:10px; width:100%; padding:16px;
                  border-radius:28px; font-size:17px; font-weight:600; margin-bottom:12px; cursor:pointer; user-select:none; }
-  label.primary { background:var(--accent); color:var(--accent-fg); }
-  label.secondary { border:1.5px solid var(--accent); color:var(--accent); }
+  .primary { background:var(--accent); color:var(--accent-fg); }
+  .secondary { border:1.5px solid var(--accent); color:var(--accent); }
   input[type=file] { display:none; }
   ul { list-style:none; padding:0; margin:20px 0; }
   li { background:var(--card); border-radius:14px; padding:12px 14px; margin-bottom:8px; display:flex; gap:10px; align-items:center; }
@@ -58,8 +66,23 @@ PAGE = """<!doctype html>
     <p class="hint">PDFs or photos of documents. You can pick several at once.</p>
     <label class="button primary">&#128196; Choose files or photos
       <input id="files" type="file" multiple accept="application/pdf,.pdf,image/*"></label>
-    <label class="button secondary">&#128247; Scan with camera
+    <a class="button primary ios" id="scan" href="shortcuts://run-shortcut?name=Scan%20to%20DocVault">&#128209; Scan document</a>
+    <label class="button secondary">&#128247; Take a photo
       <input id="camera" type="file" accept="image/*" capture="environment"></label>
+    <details class="ios" id="setup">
+      <summary>Set up Scan document (once)</summary>
+      <p>Scanning uses the iPhone's own document scanner (edges found, page straightened, several pages
+         in one PDF) through a shortcut:</p>
+      <ol>
+        <li>Open <b>Shortcuts</b>, tap <b>+</b> and name it exactly <b>Scan to DocVault</b>.</li>
+        <li>Add <b>Scan Document</b>, then <b>Make PDF</b>.</li>
+        <li>Add <b>Get Contents of URL</b> with this URL:
+          <code id="url">…</code> <button type="button" id="copy">Copy</button><br>
+          Show More &rarr; Method <b>POST</b>, Request Body <b>File</b>, File = <b>PDF</b>.</li>
+        <li>Add <b>Show Notification</b> with <b>Contents of URL</b>.</li>
+      </ol>
+      <p>Then tap Scan document here, or run the shortcut from your home screen or Siri.</p>
+    </details>
   </div>
   <ul id="list"></ul>
   <a class="done" id="done" href="/app/">Back to DocVault</a>
@@ -71,6 +94,23 @@ PAGE = """<!doctype html>
   }
   const list = document.getElementById("list"), done = document.getElementById("done");
   if (!token()) { document.getElementById("login").style.display = "block"; document.getElementById("picker").style.display = "none"; }
+
+  // iPhone/iPad: the system document scanner is only reachable from Shortcuts.
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  if (ios) {
+    document.body.classList.add("is-ios");
+    document.querySelector("label.primary").className = "button secondary";
+  }
+  if (ios && token()) {
+    fetch("/me", { headers: { "Authorization": "Bearer " + token() } }).then(r => r.ok ? r.json() : null).then(me => {
+      if (!me) return;
+      const url = location.origin + "/u/" + me.api_key + "?name=Scan.pdf";
+      document.getElementById("url").textContent = url;
+      document.getElementById("copy").onclick = async () => {
+        try { await navigator.clipboard.writeText(url); document.getElementById("copy").textContent = "Copied ✓"; } catch (e) {}
+      };
+    });
+  }
 
   async function upload(files) {
     if (!files.length) return;
