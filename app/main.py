@@ -49,6 +49,7 @@ class DocVaultApp:
         self._poll: asyncio.Task | None = None
         self._debounce: dict[str, asyncio.Task] = {}
         self._syncing = False
+        self.view = "thumbs"  # thumbnails or list, for Recent and inside categories (remembered per device)
         # Services must be created inside main() so they register with this page.
         self.prefs = ft.SharedPreferences()
         self.launcher = ft.UrlLauncher()
@@ -180,6 +181,7 @@ class DocVaultApp:
         self.api.configure(token=token)
         self.email = await self.prefs.get("dv_email") or ""
         self.api_key = await self.prefs.get("dv_api_key") or ""
+        self.view = await self.prefs.get("dv_view") or "thumbs"
 
     async def logged_in_as(self, email: str, res: dict) -> None:
         self.api.configure(token=res["access_token"])
@@ -271,6 +273,83 @@ class DocVaultApp:
         if msg:
             self.toast(msg + (" ✓" if added else ""))
         await self.sync()
+
+    # ------------------------------------------------------------ views & drag to reorder
+
+    async def set_view(self, mode: str) -> None:
+        self.view = mode
+        self._cache.clear()
+        self.refresh()
+        try:
+            await self.prefs.set("dv_view", mode)
+        except Exception:
+            pass
+
+    @property
+    def drag_affinity(self) -> ft.Axis | None:
+        """On phones a vertical swipe must still scroll, so dragging a tile starts with a sideways move."""
+        touch = self.page.platform in (ft.PagePlatform.IOS, ft.PagePlatform.ANDROID)
+        return ft.Axis.HORIZONTAL if touch else None
+
+    @staticmethod
+    def position_between(above: float | None, below: float | None) -> float | None:
+        """Positions sort high to low, so a card dropped between two others gets the midpoint."""
+        if above is None and below is None:
+            return None
+        if above is None:
+            return below + 1.0
+        if below is None:
+            return above - 1.0
+        return (above + below) / 2
+
+    def move_doc(self, items: list[dict], old: int, new: int) -> None:
+        if old == new or not 0 <= old < len(items):
+            return
+        items = list(items)
+        moved = items.pop(old)
+        new = max(0, min(new, len(items)))
+        items.insert(new, moved)
+        above = items[new - 1].get("position") if new > 0 else None
+        below = items[new + 1].get("position") if new + 1 < len(items) else None
+        position = self.position_between(above, below)
+        if position is None:
+            return
+        moved["position"] = position  # show the new order straight away
+        self.docs.sort(key=lambda d: -(d.get("position") or 0))
+        self.refresh()
+
+        async def save():
+            try:
+                await self.api.update(moved["id"], position=position)
+            except (Offline, ApiError) as e:
+                self.toast(f"Couldn't save the new order: {e}")
+                await self.sync()
+        self.run(save())
+
+    def move_doc_onto(self, items: list[dict], source_id: int, target_id: int) -> None:
+        """Thumbnail grids: a document dropped onto another takes its place."""
+        ids = [d["id"] for d in items]
+        if source_id == target_id or source_id not in ids or target_id not in ids:
+            return
+        self.move_doc(items, ids.index(source_id), ids.index(target_id))
+
+    def move_category(self, source_id: int, target_id: int) -> None:
+        ids = [c["id"] for c in self.cats]
+        if source_id == target_id or source_id not in ids or target_id not in ids:
+            return
+        target_index = ids.index(target_id)
+        ids.remove(source_id)
+        ids.insert(target_index, source_id)
+        by_id = {c["id"]: c for c in self.cats}
+        self.cats = [by_id[i] for i in ids]
+        self.refresh()
+
+        async def save():
+            try:
+                self.cats = await self.api.reorder_categories(ids)
+            except (Offline, ApiError) as e:
+                self.toast(f"Couldn't save the category order: {e}")
+        self.run(save())
 
     async def update(self, doc_id: int, **changes) -> None:
         try:

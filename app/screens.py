@@ -21,9 +21,10 @@ def _header(title: str, *actions: ft.Control) -> ft.Control:
 
 # ---------------------------------------------------------------- home
 
-def category_tile(app: "DocVaultApp", c: dict) -> ft.Control:
+def category_tile(app: "DocVaultApp", c: dict, width: float | None = None) -> ft.Container:
     return ft.Container(
-        col=TILE_COLS, padding=14, border_radius=16, ink=True, bgcolor=ft.Colors.with_opacity(0.14, c["color"]),
+        width=width, padding=14, border_radius=16, ink=True, bgcolor=ft.Colors.with_opacity(0.14, c["color"]),
+        border=ft.Border.all(2, ft.Colors.TRANSPARENT),
         on_click=lambda: app.go(f"/category/{c['id']}"),
         content=ft.Column([
             ft.Icon(icon(c["icon"]), color=c["color"], size=28),
@@ -33,42 +34,120 @@ def category_tile(app: "DocVaultApp", c: dict) -> ft.Control:
     )
 
 
+def _drop_target(app: "DocVaultApp", group: str, item_id: int, make, on_drop, col=None,
+                 feedback_width: float = 160) -> ft.Control:
+    """A tile that can be dragged, and that other tiles of the same group can be dropped on.
+
+    `make(width)` builds the tile; it's called separately for the tile itself and for the copy
+    that follows your finger (a control can only be shown in one place at a time)."""
+    tile = make(None)
+
+    def lit(on: bool):
+        tile.border = ft.Border.all(2, ft.Colors.PRIMARY if on else ft.Colors.TRANSPARENT)
+        tile.update()
+
+    def accept(e):
+        lit(False)
+        source = e.src if getattr(e, "src", None) is not None else app.page.get_control(e.src_id)
+        on_drop(int(source.data), item_id)
+
+    return ft.DragTarget(
+        group=group, col=col, data=item_id,
+        on_will_accept=lambda e: lit(bool(e.accept)), on_leave=lambda e: lit(False), on_accept=accept,
+        content=ft.Draggable(
+            group=group, data=item_id, content=tile, affinity=app.drag_affinity,
+            content_when_dragging=ft.Container(height=100, border_radius=16,
+                                               border=ft.Border.all(2, ft.Colors.OUTLINE_VARIANT)),
+            content_feedback=ft.Container(make(feedback_width), opacity=0.9)),
+    )
+
+
+def draggable_category_tile(app: "DocVaultApp", c: dict) -> ft.Control:
+    return _drop_target(app, "category", c["id"], lambda w: category_tile(app, c, width=w), app.move_category,
+                        col=TILE_COLS, feedback_width=170)
+
+
+def view_switch(app: "DocVaultApp") -> ft.Control:
+    """Thumbnails / list toggle (remembered on this device)."""
+    def button(ic, mode, tip):
+        on = app.view == mode
+        return ft.IconButton(ic, tooltip=tip, on_click=lambda: app.run(app.set_view(mode)),
+                             icon_color=ft.Colors.PRIMARY if on else ft.Colors.ON_SURFACE_VARIANT,
+                             bgcolor=ft.Colors.with_opacity(0.12, ft.Colors.PRIMARY) if on else None)
+    return ft.Row([button(ft.Icons.GRID_VIEW, "thumbs", "Thumbnails"),
+                   button(ft.Icons.VIEW_LIST, "list", "List")], spacing=0)
+
+
+def reorderable(app: "DocVaultApp", items: list[dict], make, **kwargs) -> ft.ReorderableListView:
+    """Cards that can be dragged into a new order: drag handle on a PC, press-and-hold on a phone."""
+    controls = [make(d) for d in items]
+    for d, c in zip(items, controls):
+        c.key = f"doc-{d['id']}"
+    return ft.ReorderableListView(controls=controls, scroll=ft.ScrollMode.ALWAYS,
+                                  on_reorder=lambda e: app.move_doc(items, e.old_index, e.new_index), **kwargs)
+
+
+def thumb_grid(app: "DocVaultApp", items: list[dict]) -> ft.Control:
+    """Thumbnail grid; drop a document onto another to take its place."""
+    cells = [_drop_target(app, "doc", d["id"], lambda w, d=d: doc_tile(app, d, grid=True, width=w),
+                          lambda src, dst: app.move_doc_onto(items, src, dst), col={"xs": 6, "sm": 4, "md": 3, "lg": 2},
+                          feedback_width=130)
+             for d in items]
+    return ft.ResponsiveRow(cells, spacing=12, run_spacing=12)
+
+
 def build_home(app: "DocVaultApp") -> ft.View:
     recent = app.docs[:12]
     dups = [d for d in app.docs if d.get("duplicate_of")]
-    controls: list[ft.Control] = [
+    top: list[ft.Control] = [
         ft.Row([
             ft.FilledButton("Add documents", icon=ft.Icons.UPLOAD_FILE, **app.add_button_args()),
             ft.OutlinedButton("Search", icon=ft.Icons.SEARCH, on_click=lambda: app.go("/search")),
         ], wrap=True),
     ]
+    strip: ft.Control | None = None
     if not app.docs:
-        controls.append(empty_state(ft.Icons.FOLDER_OPEN, "No documents yet.\nTap “Add documents”, or share a PDF or "
-                                    "photo to DocVault from your phone."))
+        top.append(empty_state(ft.Icons.FOLDER_OPEN, "No documents yet.\nTap “Add documents”, or share a PDF or "
+                               "photo to DocVault from your phone."))
     else:
-        controls += [_header("Recent"),
-                     ft.Row([doc_tile(app, d) for d in recent], scroll=ft.ScrollMode.ALWAYS,
-                            vertical_alignment=ft.CrossAxisAlignment.START)]
+        top.append(_header("Recent", view_switch(app)))
+        if app.view == "thumbs":
+            strip = reorderable(app, recent, lambda d: doc_tile(app, d), horizontal=True, height=250)
+
+    bottom: list[ft.Control] = []
     if dups:
-        controls.append(ft.Container(
+        bottom.append(ft.Container(
             padding=12, border_radius=12, bgcolor=ft.Colors.SURFACE_CONTAINER_LOW, ink=True,
             on_click=lambda: app.go("/duplicates"),
             content=ft.Row([ft.Icon(ft.Icons.CONTENT_COPY), ft.Text(
                 f"{len(dups)} possible duplicate{'s' * (len(dups) != 1)}: same content saved more than once",
                 expand=True), ft.Icon(ft.Icons.CHEVRON_RIGHT)])))
-    controls += [
+    bottom += [
         _header("Categories", ft.TextButton("New category", icon=ft.Icons.ADD, on_click=lambda: category_dialog(app))),
-        ft.ResponsiveRow([category_tile(app, c) for c in app.cats], spacing=10, run_spacing=10),
+        ft.Text("Drag a tile onto another to rearrange.", size=12, color=ft.Colors.ON_SURFACE_VARIANT),
+        ft.ResponsiveRow([draggable_category_tile(app, c) for c in app.cats], spacing=10, run_spacing=10),
     ]
-    return ft.View(route="/", appbar=ft.AppBar(title=ft.Text("DocVault"), actions=[
-        ft.IconButton(ft.Icons.STAR, tooltip="Favorites", on_click=lambda: app.go("/favorites")),
-        app.sync_button()]),
-        navigation_bar=app.nav_bar(0), scroll=ft.ScrollMode.ALWAYS, padding=PAD, controls=controls,
+    common = dict(
+        route="/", appbar=ft.AppBar(title=ft.Text("DocVault"), actions=[
+            ft.IconButton(ft.Icons.STAR, tooltip="Favorites", on_click=lambda: app.go("/favorites")),
+            app.sync_button()]),
+        navigation_bar=app.nav_bar(0),
         floating_action_button=ft.FloatingActionButton(icon=ft.Icons.UPLOAD_FILE, tooltip="Add documents",
-                                                       **app.add_button_args()))
+                                                       **app.add_button_args()),
+    )
+    if app.view == "list" and recent:
+        # One draggable list for the page; the rest rides along as its header and footer.
+        return ft.View(**common, padding=ft.Padding.only(left=16, top=16, right=16, bottom=0), controls=[
+            reorderable(app, recent[:8], lambda d: doc_card(app, d), expand=True,
+                        header=ft.Column(top, spacing=12), padding=ft.Padding.only(right=10),
+                        footer=ft.Container(ft.Column(bottom, spacing=12), padding=ft.Padding.only(top=12, bottom=90))),
+        ])
+    return ft.View(**common, scroll=ft.ScrollMode.ALWAYS, padding=PAD,
+                   controls=top + ([strip] if strip else []) + bottom)
 
 
 def build_list(app: "DocVaultApp", route: str) -> ft.View:
+    """A category, Favorites or Duplicates: thumbnails or list, drag to reorder in both."""
     if route == "/favorites":
         title, items = "Favorites", [d for d in app.docs if d.get("is_favorite")]
     elif route == "/duplicates":
@@ -77,10 +156,17 @@ def build_list(app: "DocVaultApp", route: str) -> ft.View:
         cat_id = int(route.rsplit("/", 1)[-1])
         title = next((c["name"] for c in app.cats if c["id"] == cat_id), "Category")
         items = [d for d in app.docs if d.get("category_id") == cat_id]
-    body = [doc_card(app, d, show_category=route in ("/favorites", "/duplicates")) for d in items] or [
-        empty_state(ft.Icons.INBOX, "Nothing here yet.")]
-    return ft.View(route=route, appbar=ft.AppBar(title=ft.Text(title), actions=[app.sync_button()]),
-                   scroll=ft.ScrollMode.ALWAYS, padding=PAD, controls=body)
+    appbar = ft.AppBar(title=ft.Text(title), actions=[view_switch(app), app.sync_button()])
+    if not items:
+        return ft.View(route=route, appbar=appbar, padding=PAD, controls=[empty_state(ft.Icons.INBOX, "Nothing here yet.")])
+    show_cat = route in ("/favorites", "/duplicates")
+    if app.view == "thumbs":
+        return ft.View(route=route, appbar=appbar, scroll=ft.ScrollMode.ALWAYS, padding=PAD, controls=[
+            ft.Text("Drag a document onto another to move it there.", size=12, color=ft.Colors.ON_SURFACE_VARIANT),
+            thumb_grid(app, items)])
+    return ft.View(route=route, appbar=appbar, padding=ft.Padding.only(left=12, top=12, right=12, bottom=0), controls=[
+        reorderable(app, items, lambda d: doc_card(app, d, show_category=show_cat), expand=True,
+                    padding=ft.Padding.only(right=10, bottom=24))])
 
 
 # ---------------------------------------------------------------- search

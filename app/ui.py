@@ -111,8 +111,8 @@ def doc_card(app: "DocVaultApp", d: dict, show_category: bool = True) -> ft.Cont
     ))
 
 
-def doc_tile(app: "DocVaultApp", d: dict) -> ft.Control:
-    """Portrait card for the Recent strip, with the same ⋮ menu."""
+def doc_tile(app: "DocVaultApp", d: dict, grid: bool = False, width: float | None = None) -> ft.Container:
+    """Portrait card for the Recent strip and thumbnail grids, with the same ⋮ menu."""
     pic = ft.Stack([
         preview(d, 120, 160),
         ft.Container(doc_menu(app, d, icon_color=ft.Colors.WHITE), right=2, top=2, width=36, height=36,
@@ -120,10 +120,13 @@ def doc_tile(app: "DocVaultApp", d: dict) -> ft.Control:
                      alignment=ft.Alignment.CENTER),
     ], width=120, height=160)
     return ft.Container(
-        width=120, margin=ft.Margin.only(right=12), padding=ft.Padding.only(bottom=16), ink=True, border_radius=8,
+        width=width or (None if grid else 120), margin=None if grid else ft.Margin.only(right=12),
+        padding=ft.Padding.all(6) if grid else ft.Padding.only(bottom=16), ink=True, border_radius=10,
+        border=ft.Border.all(2, ft.Colors.TRANSPARENT),
         on_click=lambda: app.go(f"/doc/{d['id']}"),
         content=ft.Column([pic, ft.Text(d.get("title") or "Document", size=12, max_lines=2,
-                                        overflow=ft.TextOverflow.ELLIPSIS)], spacing=4),
+                                        overflow=ft.TextOverflow.ELLIPSIS)],
+                          spacing=4, horizontal_alignment=ft.CrossAxisAlignment.CENTER if grid else ft.CrossAxisAlignment.START),
     )
 
 
