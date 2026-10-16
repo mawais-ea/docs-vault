@@ -121,3 +121,17 @@ def test_login_and_closed_registration(client, monkeypatch):
 def test_add_page_is_served(client):
     r = client.get("/add", headers={"Authorization": ""})
     assert r.status_code == 200 and 'type="file"' in r.text and "flutter.dv_token" in r.text
+
+
+def test_rename_title_and_file_name(client):
+    d = upload(client, text_pdf(BILL)).json()
+    r = client.patch(f"/documents/{d['id']}", json={"title": "  Gas bill October  ", "file_name": 'Gas: bill/Oct?.PDF'})
+    assert r.status_code == 200
+    assert r.json()["title"] == "Gas bill October" and r.json()["suggested_name"] == "Gas bill Oct.pdf"
+    from urllib.parse import unquote
+    dl = client.get(r.json()["download_url"], headers={"Authorization": ""})
+    assert "Gas bill Oct.pdf" in unquote(dl.headers["content-disposition"])
+    photo = upload(client, photo_jpeg(["Receipt"]), "p.jpg", "image/jpeg").json()
+    assert client.patch(f"/documents/{photo['id']}", json={"file_name": "Tesco receipt"}).json()["suggested_name"] == "Tesco receipt.jpg"
+    assert client.patch(f"/documents/{d['id']}", json={"file_name": "  ///  "}).status_code == 422
+    assert client.patch(f"/documents/{d['id']}", json={"title": "   "}).status_code == 422

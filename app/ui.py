@@ -77,6 +77,7 @@ def doc_menu(app: "DocVaultApp", d: dict, icon_color=None) -> ft.PopupMenuButton
             ft.PopupMenuItem(content="Download", icon=ft.Icons.DOWNLOAD, on_click=lambda: app.download(d)),
             ft.PopupMenuItem(content="Unfavorite" if d.get("is_favorite") else "Favorite", icon=ft.Icons.STAR_BORDER,
                              on_click=lambda: app.run(app.update(d["id"], is_favorite=not d.get("is_favorite")))),
+            ft.PopupMenuItem(content="Rename", icon=ft.Icons.DRIVE_FILE_RENAME_OUTLINE, on_click=lambda: rename_dialog(app, d)),
             ft.PopupMenuItem(content="Move to…", icon=ft.Icons.DRIVE_FILE_MOVE, on_click=lambda: move_dialog(app, d)),
             ft.PopupMenuItem(content="Delete", icon=ft.Icons.DELETE_OUTLINE,
                              on_click=lambda: app.run(app.delete(d["id"]))),
@@ -128,6 +129,48 @@ def doc_tile(app: "DocVaultApp", d: dict, grid: bool = False, width: float | Non
                                         overflow=ft.TextOverflow.ELLIPSIS)],
                           spacing=4, horizontal_alignment=ft.CrossAxisAlignment.CENTER if grid else ft.CrossAxisAlignment.START),
     )
+
+
+def split_name(file_name: str | None) -> tuple[str, str]:
+    """'2026-10-03 British Gas Bill.pdf' -> ('2026-10-03 British Gas Bill', '.pdf')"""
+    if not file_name or "." not in file_name:
+        return file_name or "", ""
+    stem, ext = file_name.rsplit(".", 1)
+    return stem, "." + ext
+
+
+def rename_dialog(app: "DocVaultApp", d: dict) -> None:
+    """Change what it's called in the app and the name it downloads/shares with."""
+    stem, ext = split_name(d.get("suggested_name") or d.get("original_name"))
+    title = ft.TextField(label="Name in DocVault", value=d.get("title") or "", autofocus=True)
+    file_name = ft.TextField(label="File name", value=stem, suffix=ext,
+                             helper="Used when you download or share it")
+    same = ft.Checkbox(label="Use the same name for both", value=False)
+
+    def sync_names(e=None):
+        if same.value:
+            file_name.value = title.value
+            file_name.update()
+    same.on_change = sync_names
+    title.on_change = sync_names
+
+    async def save():
+        changes = {}
+        if (title.value or "").strip() and title.value.strip() != (d.get("title") or ""):
+            changes["title"] = title.value.strip()
+        if (file_name.value or "").strip() and (file_name.value.strip() + ext) != (d.get("suggested_name") or ""):
+            changes["file_name"] = file_name.value.strip()
+        app.page.pop_dialog()
+        if changes:
+            await app.update(d["id"], **changes)
+            app.toast("Renamed")
+
+    app.page.show_dialog(ft.AlertDialog(
+        title=ft.Text("Rename"),
+        content=ft.Column([title, file_name, same], tight=True, width=380),
+        actions=[ft.TextButton("Cancel", on_click=lambda: app.page.pop_dialog()),
+                 ft.FilledButton("Save", on_click=lambda: app.run(save()))],
+    ))
 
 
 def move_dialog(app: "DocVaultApp", d: dict) -> None:

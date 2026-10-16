@@ -6,7 +6,7 @@ import flet as ft
 
 from api import ApiError, Offline
 from ui import (category_dialog, doc_card, doc_tile, empty_state, icon, move_dialog, preview, pretty_date,
-                pretty_size)
+                pretty_size, rename_dialog, split_name)
 
 if TYPE_CHECKING:
     from main import DocVaultApp
@@ -241,15 +241,20 @@ def build_detail(app: "DocVaultApp", route: str) -> ft.View:
     if doc_id not in app.details:
         app.after_render(lambda: app.load_detail(doc_id))
 
-    title = ft.TextField(label="Title", value=d.get("title") or "", multiline=True, max_lines=None)
+    title = ft.TextField(label="Name in DocVault", value=d.get("title") or "", multiline=True, max_lines=None)
+    stem, ext = split_name(d.get("suggested_name") or d.get("original_name"))
+    file_name = ft.TextField(label="File name", value=stem, suffix=ext,
+                             helper="Used when you download or share it")
     note = ft.TextField(label="Your note", value=d.get("note") or "", multiline=True, min_lines=2, max_lines=None)
     category = ft.Dropdown(label="Category", value=str(d["category_id"]) if d.get("category_id") else None,
                            options=[ft.DropdownOption(key=str(c["id"]), text=c["name"]) for c in app.cats])
 
     async def save():
         changes = {}
-        if (title.value or "") != (d.get("title") or ""):
-            changes["title"] = title.value
+        if (title.value or "").strip() and title.value.strip() != (d.get("title") or ""):
+            changes["title"] = title.value.strip()
+        if (file_name.value or "").strip() and file_name.value.strip() + ext != (d.get("suggested_name") or ""):
+            changes["file_name"] = file_name.value.strip()
         if (note.value or "") != (d.get("note") or ""):
             changes["note"] = note.value
         if category.value and int(category.value) != d.get("category_id"):
@@ -277,7 +282,7 @@ def build_detail(app: "DocVaultApp", route: str) -> ft.View:
                                                              expand=True)])))
     facts = [f for f in (
         _fact("From", d.get("issuer")), _fact("Date", pretty_date(d.get("doc_date"))), _fact("Amount", d.get("amount")),
-        _fact("File name", d.get("suggested_name")), _fact("Original", d.get("original_name")),
+        _fact("Original", d.get("original_name")),
         _fact("Size", f"{pretty_size(d.get('size'))}" + (
             f" · {d['pages']} page{'s' * (d['pages'] != 1)}" if d.get("pages") and d.get("kind") == "pdf" else "")),
         _fact("Saved", pretty_date(d.get("created_at"))),
@@ -291,7 +296,7 @@ def build_detail(app: "DocVaultApp", route: str) -> ft.View:
                     ft.Text(label, size=12, color=ft.Colors.ON_SURFACE_VARIANT, expand=True)]),
             ft.Markdown(d["summary"], selectable=True),
         ], spacing=8)))
-    controls += [title, category, note,
+    controls += [title, file_name, category, note,
                  ft.Row([ft.FilledButton("Save changes", icon=ft.Icons.CHECK, on_click=lambda: app.run(save()))],
                         alignment=ft.MainAxisAlignment.END)]
     if d.get("text"):
@@ -308,6 +313,7 @@ def build_detail(app: "DocVaultApp", route: str) -> ft.View:
             ft.IconButton(ft.Icons.STAR if fav else ft.Icons.STAR_BORDER, tooltip="Favorite",
                           icon_color=ft.Colors.AMBER if fav else None,
                           on_click=lambda: app.run(app.update(doc_id, is_favorite=not fav))),
+            ft.IconButton(ft.Icons.DRIVE_FILE_RENAME_OUTLINE, tooltip="Rename", on_click=lambda: rename_dialog(app, d)),
             ft.IconButton(ft.Icons.REFRESH, tooltip="Read and sort again", on_click=lambda: app.run(app.refresh_doc(doc_id))),
             ft.IconButton(ft.Icons.DELETE_OUTLINE, tooltip="Delete", on_click=lambda: app.run(app.delete(doc_id, go_back=True))),
         ]),

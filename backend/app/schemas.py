@@ -65,6 +65,7 @@ class DocumentPatch(BaseModel):
     is_favorite: bool | None = None
     needs_review: bool | None = None
     position: float | None = None
+    file_name: str | None = Field(default=None, max_length=200)  # rename the download name; extension is kept
 
 
 class DocumentOut(BaseModel):

@@ -1,3 +1,5 @@
+import re
+
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, PlainTextResponse
 from sqlalchemy import Text, cast, func, or_, select
@@ -23,6 +25,19 @@ def to_out(doc: Document, with_text: bool = False, already_saved: bool = False) 
     out.thumb_url = storage.signed_url(doc.user_id, doc.thumb_name)
     out.already_saved = already_saved
     return out
+
+
+_UNSAFE_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]+')
+
+
+def clean_file_name(name: str, doc: Document) -> str:
+    """A safe download name with the document's real extension, whatever was typed."""
+    ext = doc.file_name.rsplit(".", 1)[-1].lower()
+    name = re.sub(rf"\.{re.escape(ext)}$", "", name.strip(), flags=re.I)  # they may type the extension
+    name = " ".join(_UNSAFE_NAME.sub(" ", name).split()).strip(" .")[:150]
+    if not name:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "The file name can't be empty")
+    return f"{name}.{ext}"
 
 
 def _owned(db: Session, user: User, document_id: int) -> Document:
@@ -141,8 +156,12 @@ def update_document(document_id: int, body: DocumentPatch, user: User = Depends(
         doc.needs_review = False
         if doc.suggested_category == new_cat.name:
             doc.suggested_category = None
+    if "file_name" in data:
+        doc.suggested_name = clean_file_name(data.pop("file_name") or "", doc)
+    if "title" in data and not (data["title"] or "").strip():
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "The name can't be empty")
     for key, value in data.items():
-        setattr(doc, key, value)
+        setattr(doc, key, value.strip() if key == "title" else value)
     if data.get("needs_review") is False:
         doc.suggested_category = None
     db.commit()
